@@ -145,9 +145,14 @@ class TorchBasePolicy(PolicyBase):
         self.action_space = action_space
         self.device = "cpu"
 
-        checkpoint_path = "rrc2022/Trifinger-noMoveCost-masa-85.pth"
-        with open("rrc2022/params_masa.pk", "rb") as file:
+        # get absolute path for predefined info
+        checkpoint_path = policies.get_model_path("Trifinger-noMoveCost-masa-85.pt")
+        params_path = policies.get_model_path("params_masa.pt")
+        env_info_path = policies.get_model_path("env_info.pt")
+
+        with open(params_path, "rb") as file:
             params = pickle.load(file)
+        params['env_info_path'] = env_info_path
         self.agent = players.PpoPlayerContinuous(params)
         self.agent.restore(checkpoint_path)
 
@@ -207,7 +212,7 @@ class TorchBasePolicy(PolicyBase):
 
     def get_action(self, observation):
         obs = self.get_obs(observation).squeeze(0)
-        obs = torch.tensor(obs, dtype=torch.float, device=self.device)
+        obs = obs.float()
         action = self.agent.get_action(obs, is_determenistic = True).squeeze(0)
         action = unscale_transform(
                 action,
