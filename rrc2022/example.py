@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import time
 
-def scale_transform(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
+def scale_transform(x, lower, upper):
     """
     Normalizes a given input tensor to a range of [-1, 1].
 
@@ -32,7 +32,7 @@ def scale_transform(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -
     # return normalized tensor
     return 2 * (x - offset) / (upper - lower)
 
-def unscale_transform(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
+def unscale_transform(x, lower, upper):
     """
     Denormalizes a given input tensor from range of [-1, 1] to (lower, upper).
 
@@ -54,11 +54,10 @@ def unscale_transform(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor)
 def quat_rotate_inverse(q, v):
     q_w = q[-1]
     q_vec = q[:3]
-    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
-    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
+    a = v * (2.0 * q_w ** 2 - 1.0)[...,np.newaxis]
+    b = np.cross(q_vec, v, axis=-1) * q_w[...,np.newaxis] * 2.0
     c = q_vec * \
-        torch.matmul(q_vec.view(1, 3), v.view(
-            3, 1)).squeeze(-1) * 2.0
+        np.matmul(q_vec.reshape((1, 3)), v.reshape((3, 1))).squeeze(-1) * 2.0
     return a - b + c
 
 def quat_mul(a, b):
@@ -74,16 +73,16 @@ def quat_mul(a, b):
     y = qq - yy + (w1 - x1) * (y2 + z2)
     z = qq - zz + (z1 + y1) * (w2 - x2)
 
-    quat = torch.stack([x, y, z, w], dim=-1)
+    quat = np.stack([x, y, z, w], axis=-1)
 
     return quat
 
 def quat_conjugate(a):
-    return torch.cat((-a[:3], a[-1:]), dim=-1)
+    return np.concatenate((-a[:3], a[-1:]), axis=-1)
 
 class TorchBasePolicy(PolicyBase):
     # TODO: check if the order of fingers are same as simulator
-    quats_symmetry = torch.tensor([[0,0,0,1],[0, 0, 0.8660254, -0.5],[0, 0, 0.8660254, 0.5]], dtype=float)
+    quats_symmetry = np.array([[0,0,0,1],[0, 0, 0.8660254, -0.5],[0, 0, 0.8660254, 0.5]], dtype=float)
     symm_agents_inds = [
         [0,1,2],
         [3,4,5],
@@ -156,20 +155,20 @@ class TorchBasePolicy(PolicyBase):
         # )
 
         # change constant buffers from numpy/lists into torch tensors
-        # limits for robot
-        for limit_name in self._robot_limits:
-            # extract limit simple-namespace
-            limit_dict = self._robot_limits[limit_name].__dict__
-            # iterate over namespace attributes
-            for prop, value in limit_dict.items():
-                limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
-        # limits for the object
-        for limit_name in self._object_limits:
-            # extract limit simple-namespace
-            limit_dict = self._object_limits[limit_name].__dict__
-            # iterate over namespace attributes
-            for prop, value in limit_dict.items():
-                limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
+        # # limits for robot
+        # for limit_name in self._robot_limits:
+        #     # extract limit simple-namespace
+        #     limit_dict = self._robot_limits[limit_name].__dict__
+        #     # iterate over namespace attributes
+        #     for prop, value in limit_dict.items():
+        #         limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
+        # # limits for the object
+        # for limit_name in self._object_limits:
+        #     # extract limit simple-namespace
+        #     limit_dict = self._object_limits[limit_name].__dict__
+        #     # iterate over namespace attributes
+        #     for prop, value in limit_dict.items():
+        #         limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
 
         self._dof_position_scale = SimpleNamespace(
                 low=self._robot_limits["joint_position"].low,
@@ -180,11 +179,11 @@ class TorchBasePolicy(PolicyBase):
                 high=self._robot_limits["joint_velocity"].high
             )
         
-        object_obs_low = torch.cat([
+        object_obs_low = np.concatenate([
                                        self._object_limits["position"].low,
                                        self._object_limits["orientation"].low,
                                    ]*2)
-        object_obs_high = torch.cat([
+        object_obs_high = np.concatenate([
                                         self._object_limits["position"].high,
                                         self._object_limits["orientation"].high,
                                     ]*2)
@@ -206,7 +205,7 @@ class TorchBasePolicy(PolicyBase):
 
     def get_action(self, observation):
         # time1=time.time()
-        obs = self.get_obs(observation)
+        obs = torch.from_numpy(self.get_obs(observation))
         obs = obs.float()
         # print(f"get obs time: {time.time()-time1}")
         action = self.agent.get_action(obs, is_determenistic = True).squeeze(0)
@@ -221,23 +220,23 @@ class TorchBasePolicy(PolicyBase):
         return action
     
     def _get_obs_parts(self,observation):
-        dof_pos_scaled = scale_transform(torch.from_numpy(observation['robot_observation']['position']),
+        dof_pos_scaled = scale_transform(observation['robot_observation']['position'],
                                          self._dof_position_scale.low,
                                          self._dof_position_scale.high)
-        dof_vel_scaled = scale_transform(torch.from_numpy(observation['robot_observation']['velocity']),
+        dof_vel_scaled = scale_transform(observation['robot_observation']['velocity'],
                                          self._dof_velocity_scale.low,
                                          self._dof_velocity_scale.high)
-        action_scaled = scale_transform(torch.from_numpy(observation['action']),
+        action_scaled = scale_transform(observation['action'],
                                         self._action_scale.low,
                                         self._action_scale.high)
         object_goal_position, object_goal_orientation = get_pose_from_keypoints(observation['desired_goal']['keypoints'])
-        obs_center = torch.cat(
+        obs_center = np.concatenate(
             (
-            torch.from_numpy(observation['object_observation']['position']),
-            torch.from_numpy(observation['object_observation']['orientation']),
-            torch.from_numpy(object_goal_position),
-            torch.from_numpy(object_goal_orientation)
-            ),dim=-1
+            observation['object_observation']['position'],
+            observation['object_observation']['orientation'],
+            object_goal_position,
+            object_goal_orientation
+            ),axis=-1
         )
         # obs_center_pos = torch.stack(
         #     (
@@ -259,28 +258,24 @@ class TorchBasePolicy(PolicyBase):
         # stack observation for symmetric parts of the robot
         obs_limbs = []
         for j in range(3):
-            obs_limbs.append(torch.cat(
+            obs_limbs.append(np.concatenate(
                 (dof_pos_scaled[self.symm_agents_inds[j]],
                  dof_vel_scaled[self.symm_agents_inds[j]],
-                 action_scaled[self.symm_agents_inds[j]],), dim=-1
+                 action_scaled[self.symm_agents_inds[j]],), axis=-1
             ))
         obs_rotates = []
-        obs_center_rotate = obs_center.clone()
-        obs_center_rotate[:3] = quat_rotate_inverse(self.quats_symmetry[0], obs_center_rotate[:3])
-        obs_center_rotate[3:7] = quat_mul(quat_conjugate(self.quats_symmetry[0]), obs_center_rotate[3:7])
-        obs_center_rotate[7:10] = quat_rotate_inverse(self.quats_symmetry[0], obs_center_rotate[7:10])
-        obs_center_rotate[10:] = quat_mul(quat_conjugate(self.quats_symmetry[0]), obs_center_rotate[10:])
+        obs_center_rotate = obs_center.copy()
         obs_center_rotate = scale_transform(obs_center_rotate,
                                             self._object_obs_scale.low,
                                             self._object_obs_scale.high)
-        obs_rotates.append(torch.cat(
+        obs_rotates.append(np.concatenate(
                 (obs_center_rotate,
                  obs_limbs[0],
                  obs_limbs[1],
-                 obs_limbs[2]), dim=-1
+                 obs_limbs[2]), axis=-1
             ))
         for i in range(1,3):
-            obs_center_rotate = obs_center.clone()
+            obs_center_rotate = obs_center.copy()
             obs_center_rotate[:3] = quat_rotate_inverse(self.quats_symmetry[i], obs_center_rotate[:3])
             obs_center_rotate[3:7] = quat_mul(quat_conjugate(self.quats_symmetry[i]), obs_center_rotate[3:7])
             obs_center_rotate[7:10] = quat_rotate_inverse(self.quats_symmetry[i], obs_center_rotate[7:10])
@@ -288,13 +283,13 @@ class TorchBasePolicy(PolicyBase):
             obs_center_rotate = scale_transform(obs_center_rotate,
                                                 self._object_obs_scale.low,
                                                 self._object_obs_scale.high)
-            obs_rotates.append(torch.cat(
+            obs_rotates.append(np.concatenate(
                 (obs_center_rotate,
                  obs_limbs[i],
                  obs_limbs[(i+1)%3],
-                 obs_limbs[(i+2)%3]), dim=-1
+                 obs_limbs[(i+2)%3]), axis=-1
             ))
-        return torch.stack(obs_rotates, dim=0)
+        return np.stack(obs_rotates, axis=0)
 
     # def process_obs(self, obs):
     #     """ generate obs for masa given dict obs
