@@ -6,6 +6,7 @@ from rrc_2022_datasets import PolicyBase
 
 from . import policies
 
+import time
 
 class TorchBasePolicy(PolicyBase):
     def __init__(
@@ -31,10 +32,12 @@ class TorchBasePolicy(PolicyBase):
         pass  # nothing to do here
 
     def get_action(self, observation):
+        time1=time.time()
         observation = torch.tensor(observation, dtype=torch.float, device=self.device)
         action = self.policy(observation.unsqueeze(0))
         action = action.detach().numpy()[0]
         action = np.clip(action, self.action_space.low, self.action_space.high)
+        print(f"get action time: {time.time()-time1}")
         return action
 
 
