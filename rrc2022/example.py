@@ -149,6 +149,10 @@ class TorchBasePolicy(PolicyBase):
         self.agent = players.PpoPlayerContinuous(params)
         self.agent.restore(checkpoint_path)
 
+        self.obs_limbs = np.zeros((3,9))
+        self.obs_rotates = np.zeros((3,41))
+        self.obs_center_rotate = np.zeros((3,14))
+
         # # load torch script
         # self.policy = torch.jit.load(
         #     torch_model_path, map_location=torch.device(self.device)
@@ -216,7 +220,7 @@ class TorchBasePolicy(PolicyBase):
             )
         action = action.detach().numpy()
         # action = np.clip(action, self.action_space.low, self.action_space.high)
-        # print(f"get action time: {time.time()-time1}")
+        # print(f"forward time: {time.time()-time1}")
         return action
     
     def _get_obs_parts(self,observation):
@@ -256,40 +260,26 @@ class TorchBasePolicy(PolicyBase):
     def get_obs(self, observation):
         dof_pos_scaled, dof_vel_scaled, action_scaled, obs_center = self._get_obs_parts(observation)
         # stack observation for symmetric parts of the robot
-        obs_limbs = []
         for j in range(3):
-            obs_limbs.append(np.concatenate(
-                (dof_pos_scaled[self.symm_agents_inds[j]],
-                 dof_vel_scaled[self.symm_agents_inds[j]],
-                 action_scaled[self.symm_agents_inds[j]],), axis=-1
-            ))
-        obs_rotates = []
-        obs_center_rotate = obs_center.copy()
-        obs_center_rotate = scale_transform(obs_center_rotate,
-                                            self._object_obs_scale.low,
-                                            self._object_obs_scale.high)
-        obs_rotates.append(np.concatenate(
-                (obs_center_rotate,
-                 obs_limbs[0],
-                 obs_limbs[1],
-                 obs_limbs[2]), axis=-1
-            ))
-        for i in range(1,3):
-            obs_center_rotate = obs_center.copy()
-            obs_center_rotate[:3] = quat_rotate_inverse(self.quats_symmetry[i], obs_center_rotate[:3])
-            obs_center_rotate[3:7] = quat_mul(quat_conjugate(self.quats_symmetry[i]), obs_center_rotate[3:7])
-            obs_center_rotate[7:10] = quat_rotate_inverse(self.quats_symmetry[i], obs_center_rotate[7:10])
-            obs_center_rotate[10:] = quat_mul(quat_conjugate(self.quats_symmetry[i]), obs_center_rotate[10:])
-            obs_center_rotate = scale_transform(obs_center_rotate,
+            self.obs_limbs[j, :3]=dof_pos_scaled[self.symm_agents_inds[j]]
+            self.obs_limbs[j, 3:6]=dof_vel_scaled[self.symm_agents_inds[j]]
+            self.obs_limbs[j, 6:]=action_scaled[self.symm_agents_inds[j]]
+
+        for i in range(3):
+            
+            self.obs_center_rotate[i] = obs_center
+            self.obs_center_rotate[i,:3] = quat_rotate_inverse(self.quats_symmetry[i], self.obs_center_rotate[i,:3])
+            self.obs_center_rotate[i,3:7] = quat_mul(quat_conjugate(self.quats_symmetry[i]), self.obs_center_rotate[i,3:7])
+            self.obs_center_rotate[i,7:10] = quat_rotate_inverse(self.quats_symmetry[i], self.obs_center_rotate[i,7:10])
+            self.obs_center_rotate[i,10:] = quat_mul(quat_conjugate(self.quats_symmetry[i]), self.obs_center_rotate[i,10:])
+            self.obs_center_rotate[i] = scale_transform(self.obs_center_rotate[i],
                                                 self._object_obs_scale.low,
                                                 self._object_obs_scale.high)
-            obs_rotates.append(np.concatenate(
-                (obs_center_rotate,
-                 obs_limbs[i],
-                 obs_limbs[(i+1)%3],
-                 obs_limbs[(i+2)%3]), axis=-1
-            ))
-        return np.stack(obs_rotates, axis=0)
+            self.obs_rotates[i,:14]=self.obs_center_rotate[i]
+            self.obs_rotates[i,14:23]=self.obs_limbs[i]
+            self.obs_rotates[i,23:32]=self.obs_limbs[(i+1)%3]
+            self.obs_rotates[i,32:]=self.obs_limbs[(i+2)%3]
+        return self.obs_rotates
 
     # def process_obs(self, obs):
     #     """ generate obs for masa given dict obs
