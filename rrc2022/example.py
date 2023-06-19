@@ -56,8 +56,8 @@ def quat_rotate_inverse(q, v):
     q_vec = q[:3]
     a = v * (2.0 * q_w ** 2 - 1.0)[...,np.newaxis]
     b = np.cross(q_vec, v, axis=-1) * q_w[...,np.newaxis] * 2.0
-    c = q_vec * \
-        np.matmul(q_vec.reshape((1, 3)), v.reshape((3, 1))).squeeze(-1) * 2.0
+    c = q_vec * np.dot(q_vec, v) * 2.0
+    # np.matmul(q_vec.reshape((1, 3)), v.reshape((3, 1))).squeeze(-1) * 2.0
     return a - b + c
 
 def quat_mul(a, b):
@@ -73,9 +73,9 @@ def quat_mul(a, b):
     y = qq - yy + (w1 - x1) * (y2 + z2)
     z = qq - zz + (z1 + y1) * (w2 - x2)
 
-    quat = np.stack([x, y, z, w], axis=-1)
+    # quat = np.stack([x, y, z, w], axis=-1)
 
-    return quat
+    return np.array([x,y,z,w])
 
 def quat_conjugate(a):
     return np.concatenate((-a[:3], a[-1:]), axis=-1)
@@ -83,6 +83,9 @@ def quat_conjugate(a):
 class TorchBasePolicy(PolicyBase):
     # TODO: check if the order of fingers are same as simulator
     quats_symmetry = np.array([[0,0,0,1],[0, 0, 0.8660254, -0.5],[0, 0, 0.8660254, 0.5]], dtype=float)
+    quats_symmetry_conjugate = quats_symmetry.copy()
+    for i in range(3):
+        quats_symmetry_conjugate[i] = quat_conjugate(quats_symmetry_conjugate[i])
     symm_agents_inds = [
         [0,1,2],
         [3,4,5],
@@ -200,6 +203,8 @@ class TorchBasePolicy(PolicyBase):
             high=self._robot_limits["joint_torque"].high
         )
 
+        self.keypoints = None
+
     @staticmethod
     def is_using_flattened_observations():
         return False
@@ -208,11 +213,12 @@ class TorchBasePolicy(PolicyBase):
         pass  # nothing to do here
 
     def get_action(self, observation):
-        time1=time.time()
+        # time1=time.time()
         with torch.no_grad():
             obs = torch.from_numpy(self.get_obs(observation))
             obs = obs.float()
-            print(f"get obs time: {time.time()-time1}")
+            # print(f"get obs time: {time.time()-time1}")
+            # time2=time.time()
             action = self.agent.get_action(obs, is_determenistic = True).squeeze(0)
             action = unscale_transform(
                     action,
@@ -221,10 +227,10 @@ class TorchBasePolicy(PolicyBase):
                 )
             action = action.detach().numpy()
             # action = np.clip(action, self.action_space.low, self.action_space.high)
-            print(f"forward time: {time.time()-time1}")
+            # print(f"forward time: {time.time()-time2}")
             return action
     
-    def _get_obs_parts(self,observation):
+    def get_obs(self, observation):
         dof_pos_scaled = scale_transform(observation['robot_observation']['position'],
                                          self._dof_position_scale.low,
                                          self._dof_position_scale.high)
@@ -234,45 +240,81 @@ class TorchBasePolicy(PolicyBase):
         action_scaled = scale_transform(observation['action'],
                                         self._action_scale.low,
                                         self._action_scale.high)
-        object_goal_position, object_goal_orientation = get_pose_from_keypoints(observation['desired_goal']['keypoints'])
-        obs_center = np.concatenate(
-            (
-            observation['object_observation']['position'],
-            observation['object_observation']['orientation'],
-            object_goal_position,
-            object_goal_orientation
-            ),axis=-1
-        )
-        # obs_center_pos = torch.stack(
-        #     (
-        #     torch.from_numpy(observation['object_observation']['position']),
-        #     torch.from_numpy(object_goal_position),
-        #     ),dim=0
-        # )
-        # obs_center_ori = torch.stack(
-        #     (
-        #     torch.from_numpy(observation['object_observation']['orientation']),
-        #     torch.from_numpy(object_goal_orientation)
-        #     ),dim=0
-        # )
 
-        return dof_pos_scaled, dof_vel_scaled, action_scaled, obs_center
-    
-    def get_obs(self, observation):
-        dof_pos_scaled, dof_vel_scaled, action_scaled, obs_center = self._get_obs_parts(observation)
-        # stack observation for symmetric parts of the robot
+        if np.array_equal(self.keypoints, observation['desired_goal']['keypoints']):
+            pass
+        else:
+            self.object_goal_position, self.object_goal_orientation = get_pose_from_keypoints(observation['desired_goal']['keypoints'])
+            self.keypoints = observation['desired_goal']['keypoints']
+            
+
+
+        # self.obs_limbs[0, :3]=dof_pos_scaled[self.symm_agents_inds[0]]
+        # self.obs_limbs[0, 3:6]=dof_vel_scaled[self.symm_agents_inds[0]]
+        # self.obs_limbs[0, 6:]=action_scaled[self.symm_agents_inds[0]]
+        # self.obs_limbs[1, :3]=dof_pos_scaled[self.symm_agents_inds[1]]
+        # self.obs_limbs[1, 3:6]=dof_vel_scaled[self.symm_agents_inds[1]]
+        # self.obs_limbs[1, 6:]=action_scaled[self.symm_agents_inds[1]]
+        # self.obs_limbs[2, :3]=dof_pos_scaled[self.symm_agents_inds[2]]
+        # self.obs_limbs[2, 3:6]=dof_vel_scaled[self.symm_agents_inds[2]]
+        # self.obs_limbs[2, 6:]=action_scaled[self.symm_agents_inds[2]]
+
         for j in range(3):
             self.obs_limbs[j, :3]=dof_pos_scaled[self.symm_agents_inds[j]]
             self.obs_limbs[j, 3:6]=dof_vel_scaled[self.symm_agents_inds[j]]
             self.obs_limbs[j, 6:]=action_scaled[self.symm_agents_inds[j]]
 
-        for i in range(3):
-            
-            self.obs_center_rotate[i] = obs_center
-            self.obs_center_rotate[i,:3] = quat_rotate_inverse(self.quats_symmetry[i], self.obs_center_rotate[i,:3])
-            self.obs_center_rotate[i,3:7] = quat_mul(quat_conjugate(self.quats_symmetry[i]), self.obs_center_rotate[i,3:7])
-            self.obs_center_rotate[i,7:10] = quat_rotate_inverse(self.quats_symmetry[i], self.obs_center_rotate[i,7:10])
-            self.obs_center_rotate[i,10:] = quat_mul(quat_conjugate(self.quats_symmetry[i]), self.obs_center_rotate[i,10:])
+        # self.obs_center_rotate[0,:3] = quat_rotate_inverse(self.quats_symmetry[0], observation['object_observation']['position'])
+        # self.obs_center_rotate[0,3:7] = quat_mul(self.quats_symmetry_conjugate[0], observation['object_observation']['orientation'])
+        # self.obs_center_rotate[0,7:10] = quat_rotate_inverse(self.quats_symmetry[0], object_goal_position)
+        # self.obs_center_rotate[0,10:] = quat_mul(self.quats_symmetry_conjugate[0], object_goal_orientation)
+        # self.obs_center_rotate[0] = scale_transform(self.obs_center_rotate[0],
+        #                                     self._object_obs_scale.low,
+        #                                     self._object_obs_scale.high)
+        # self.obs_rotates[0,:14]=self.obs_center_rotate[0]
+        # self.obs_rotates[0,14:23]=self.obs_limbs[0]
+        # self.obs_rotates[0,23:32]=self.obs_limbs[1]
+        # self.obs_rotates[0,32:]=self.obs_limbs[2]
+        # self.obs_center_rotate[1,:3] = quat_rotate_inverse(self.quats_symmetry[1], observation['object_observation']['position'])
+        # self.obs_center_rotate[1,3:7] = quat_mul(self.quats_symmetry_conjugate[1], observation['object_observation']['orientation'])
+        # self.obs_center_rotate[1,7:10] = quat_rotate_inverse(self.quats_symmetry[1], object_goal_position)
+        # self.obs_center_rotate[1,10:] = quat_mul(self.quats_symmetry_conjugate[1], object_goal_orientation)
+        # self.obs_center_rotate[1] = scale_transform(self.obs_center_rotate[1],
+        #                                     self._object_obs_scale.low,
+        #                                     self._object_obs_scale.high)
+        # self.obs_rotates[1,:14]=self.obs_center_rotate[1]
+        # self.obs_rotates[1,14:23]=self.obs_limbs[1]
+        # self.obs_rotates[1,23:32]=self.obs_limbs[2]
+        # self.obs_rotates[1,32:]=self.obs_limbs[0]
+        # self.obs_center_rotate[2,:3] = quat_rotate_inverse(self.quats_symmetry[2], observation['object_observation']['position'])
+        # self.obs_center_rotate[2,3:7] = quat_mul(self.quats_symmetry_conjugate[2], observation['object_observation']['orientation'])
+        # self.obs_center_rotate[2,7:10] = quat_rotate_inverse(self.quats_symmetry[2], object_goal_position)
+        # self.obs_center_rotate[2,10:] = quat_mul(self.quats_symmetry_conjugate[2], object_goal_orientation)
+        # self.obs_center_rotate[2] = scale_transform(self.obs_center_rotate[2],
+        #                                     self._object_obs_scale.low,
+        #                                     self._object_obs_scale.high)
+        # self.obs_rotates[2,:14]=self.obs_center_rotate[2]
+        # self.obs_rotates[2,14:23]=self.obs_limbs[2]
+        # self.obs_rotates[2,23:32]=self.obs_limbs[0]
+        # self.obs_rotates[2,32:]=self.obs_limbs[1]
+
+        self.obs_center_rotate[0,:3] = observation['object_observation']['position']
+        self.obs_center_rotate[0,3:7] = observation['object_observation']['orientation']
+        self.obs_center_rotate[0,7:10] = self.object_goal_position
+        self.obs_center_rotate[0,10:] = self.object_goal_orientation
+        self.obs_center_rotate[0] = scale_transform(self.obs_center_rotate[0],
+                                            self._object_obs_scale.low,
+                                            self._object_obs_scale.high)
+        self.obs_rotates[0,:14]=self.obs_center_rotate[0]
+        self.obs_rotates[0,14:23]=self.obs_limbs[0]
+        self.obs_rotates[0,23:32]=self.obs_limbs[1]
+        self.obs_rotates[0,32:]=self.obs_limbs[2]
+
+        for i in range(1,3):
+            self.obs_center_rotate[i,:3] = quat_rotate_inverse(self.quats_symmetry[i], observation['object_observation']['position'])
+            self.obs_center_rotate[i,3:7] = quat_mul(self.quats_symmetry_conjugate[i], observation['object_observation']['orientation'])
+            self.obs_center_rotate[i,7:10] = quat_rotate_inverse(self.quats_symmetry[i], self.object_goal_position)
+            self.obs_center_rotate[i,10:] = quat_mul(self.quats_symmetry_conjugate[i], self.object_goal_orientation)
             self.obs_center_rotate[i] = scale_transform(self.obs_center_rotate[i],
                                                 self._object_obs_scale.low,
                                                 self._object_obs_scale.high)
@@ -281,10 +323,6 @@ class TorchBasePolicy(PolicyBase):
             self.obs_rotates[i,23:32]=self.obs_limbs[(i+1)%3]
             self.obs_rotates[i,32:]=self.obs_limbs[(i+2)%3]
         return self.obs_rotates
-
-    # def process_obs(self, obs):
-    #     """ generate obs for masa given dict obs
-    #     """
 
 
 
