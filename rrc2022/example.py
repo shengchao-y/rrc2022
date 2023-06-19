@@ -209,7 +209,7 @@ class TorchBasePolicy(PolicyBase):
 
     def get_action(self, observation):
         time1=time.time()
-        with torch.no_grad:
+        with torch.no_grad():
             obs = torch.from_numpy(self.get_obs(observation))
             obs = obs.float()
             print(f"get obs time: {time.time()-time1}")
