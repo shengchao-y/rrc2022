@@ -208,20 +208,21 @@ class TorchBasePolicy(PolicyBase):
         pass  # nothing to do here
 
     def get_action(self, observation):
-        # time1=time.time()
-        obs = torch.from_numpy(self.get_obs(observation))
-        obs = obs.float()
-        # print(f"get obs time: {time.time()-time1}")
-        action = self.agent.get_action(obs, is_determenistic = True).squeeze(0)
-        action = unscale_transform(
-                action,
-                lower=self._action_scale.low,
-                upper=self._action_scale.high
-            )
-        action = action.detach().numpy()
-        # action = np.clip(action, self.action_space.low, self.action_space.high)
-        # print(f"forward time: {time.time()-time1}")
-        return action
+        time1=time.time()
+        with torch.no_grad:
+            obs = torch.from_numpy(self.get_obs(observation))
+            obs = obs.float()
+            print(f"get obs time: {time.time()-time1}")
+            action = self.agent.get_action(obs, is_determenistic = True).squeeze(0)
+            action = unscale_transform(
+                    action,
+                    lower=self._action_scale.low,
+                    upper=self._action_scale.high
+                )
+            action = action.detach().numpy()
+            # action = np.clip(action, self.action_space.low, self.action_space.high)
+            print(f"forward time: {time.time()-time1}")
+            return action
     
     def _get_obs_parts(self,observation):
         dof_pos_scaled = scale_transform(observation['robot_observation']['position'],
