@@ -14,38 +14,12 @@ from types import SimpleNamespace
 import time
 
 def scale_transform(x, lower, upper):
-    """
-    Normalizes a given input tensor to a range of [-1, 1].
-
-    @note It uses pytorch broadcasting functionality to deal with batched input.
-
-    Args:
-        x: Input tensor of shape (N, dims).
-        lower: The minimum value of the tensor. Shape (dims,)
-        upper: The maximum value of the tensor. Shape (dims,)
-
-    Returns:
-        Normalized transform of the tensor. Shape (N, dims)
-    """
     # default value of center
     offset = (lower + upper) * 0.5
     # return normalized tensor
     return 2 * (x - offset) / (upper - lower)
 
 def unscale_transform(x, lower, upper):
-    """
-    Denormalizes a given input tensor from range of [-1, 1] to (lower, upper).
-
-    @note It uses pytorch broadcasting functionality to deal with batched input.
-
-    Args:
-        x: Input tensor of shape (N, dims).
-        lower: The minimum value of the tensor. Shape (dims,)
-        upper: The maximum value of the tensor. Shape (dims,)
-
-    Returns:
-        Denormalized transform of the tensor. Shape (N, dims)
-    """
     # default value of center
     offset = (lower + upper) * 0.5
     # return normalized tensor
@@ -183,12 +157,12 @@ class TorchBasePolicy(PolicyBase):
         pass  # nothing to do here
 
     def get_action(self, observation):
-        # time1=time.time()
+        time1=time.time()
         with torch.no_grad():
             obs = torch.from_numpy(self.get_obs(observation))
             obs = obs.float()
-            # print(f"get obs time: {time.time()-time1}")
-            # time2=time.time()
+            print(f"get obs time: {time.time()-time1}")
+            time2=time.time()
             action = self.agent.get_action(obs, is_determenistic = True).squeeze(0)
             action = unscale_transform(
                     action,
@@ -197,7 +171,7 @@ class TorchBasePolicy(PolicyBase):
                 )
             action = action.detach().numpy()
             # action = np.clip(action, self.action_space.low, self.action_space.high)
-            # print(f"forward time: {time.time()-time2}")
+            print(f"forward time: {time.time()-time2}")
             return action
     
     def get_obs(self, observation):
