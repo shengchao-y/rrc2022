@@ -110,6 +110,9 @@ class TorchBasePolicy(PolicyBase):
         checkpoint_path = policies.get_model_path("Trifinger-noMoveCost-masa-85.pt")
         params_path = policies.get_model_path("params_masa.pt")
         env_info_path = policies.get_model_path("env_info.pt")
+        obs_test_path = policies.get_model_path("obs_test.pt")
+        with open(obs_test_path, 'rb') as file:
+            obs_test = pickle.load(file)
 
         with open(params_path, "rb") as file:
             params = pickle.load(file)
@@ -148,6 +151,7 @@ class TorchBasePolicy(PolicyBase):
         )
 
         self.keypoints = None
+        self.get_action(obs_test)
 
     @staticmethod
     def is_using_flattened_observations():

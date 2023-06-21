@@ -161,12 +161,12 @@ class TorchBasePolicy(PolicyBase):
         pass  # nothing to do here
 
     def get_action(self, observation):
-        time1=time.time()
+        # time1=time.time()
         with torch.no_grad():
             obs = torch.from_numpy(self._get_obs(observation))
             obs = obs.float()
-            print(f"get obs time: {time.time()-time1}")
-            time2=time.time()
+            # print(f"get obs time: {time.time()-time1}")
+            # time2=time.time()
             action = self.agent.get_action(obs, is_determenistic = True).squeeze(0)
             action = unscale_transform(
                     action,
@@ -175,7 +175,7 @@ class TorchBasePolicy(PolicyBase):
                 )
             action = action.detach().numpy()
             # action = np.clip(action, self.action_space.low, self.action_space.high)
-            print(f"forward time: {time.time()-time2}")
+            # print(f"forward time: {time.time()-time2}")
             return action
     
     def _get_obs(self, observation):
