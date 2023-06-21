@@ -111,14 +111,14 @@ class TorchBasePolicy(PolicyBase):
         params_path = policies.get_model_path("params_masa.pt")
         env_info_path = policies.get_model_path("env_info.pt")
         obs_test_path = policies.get_model_path("obs_test.pt")
+        with open(obs_test_path, 'rb') as file:
+            obs_test = pickle.load(file)
 
         with open(params_path, "rb") as file:
             params = pickle.load(file)
         params['env_info_path'] = env_info_path
         self.agent = players.PpoPlayerContinuous(params)
         self.agent.restore(checkpoint_path)
-        with open(obs_test_path, 'rb') as file:
-            obs_test = pickle.load(file)
 
         self.obs_limbs = np.zeros((3,9))
         self.obs_rotates = np.zeros((3,41))
@@ -151,6 +151,7 @@ class TorchBasePolicy(PolicyBase):
         )
 
         self.keypoints = None
+        self.n_step = 0
         self.get_action(obs_test)
 
     @staticmethod
@@ -161,12 +162,12 @@ class TorchBasePolicy(PolicyBase):
         pass  # nothing to do here
 
     def get_action(self, observation):
-        # time1=time.time()
+        time1=time.time()
         with torch.no_grad():
-            obs = torch.from_numpy(self._get_obs(observation))
+            obs = torch.from_numpy(self.get_obs(observation))
             obs = obs.float()
-            # print(f"get obs time: {time.time()-time1}")
-            # time2=time.time()
+            print(f"get obs time: {time.time()-time1}")
+            time2=time.time()
             action = self.agent.get_action(obs, is_determenistic = True).squeeze(0)
             action = unscale_transform(
                     action,
@@ -175,10 +176,10 @@ class TorchBasePolicy(PolicyBase):
                 )
             action = action.detach().numpy()
             # action = np.clip(action, self.action_space.low, self.action_space.high)
-            # print(f"forward time: {time.time()-time2}")
+            print(f"forward time: {time.time()-time2}")
             return action
     
-    def _get_obs(self, observation):
+    def get_obs(self, observation):
         dof_pos_scaled = scale_transform(observation['robot_observation']['position'],
                                          self._dof_position_scale.low,
                                          self._dof_position_scale.high)
@@ -189,14 +190,15 @@ class TorchBasePolicy(PolicyBase):
                                         self._action_scale.low,
                                         self._action_scale.high)
 
-        if np.array_equal(self.keypoints, observation['desired_goal']['keypoints']):
+        # 1500 steps for one episode
+        if self.n_step%1500 != 0:
             pass
         else:
             self.object_goal_position, self.object_goal_orientation = get_pose_from_keypoints(observation['desired_goal']['keypoints'])
             self.keypoints = observation['desired_goal']['keypoints']
             self.goal_pos_rotate = [self.object_goal_position, quat_rotate_inverse(self.quats_symmetry[1], self.object_goal_position), quat_rotate_inverse(self.quats_symmetry[2], self.object_goal_position)]
             self.goal_ori_rotate = [self.object_goal_orientation, quat_mul(self.quats_symmetry_conjugate[1], self.object_goal_orientation), quat_mul(self.quats_symmetry_conjugate[2], self.object_goal_orientation)]
-
+        self.n_step+=1
 
         for j in range(3):
             self.obs_limbs[j, :3]=dof_pos_scaled[self.symm_agents_inds[j]]

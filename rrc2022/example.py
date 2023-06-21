@@ -151,6 +151,7 @@ class TorchBasePolicy(PolicyBase):
         )
 
         self.keypoints = None
+        self.n_step = 0
         self.get_action(obs_test)
 
     @staticmethod
@@ -189,14 +190,15 @@ class TorchBasePolicy(PolicyBase):
                                         self._action_scale.low,
                                         self._action_scale.high)
 
-        if np.array_equal(self.keypoints, observation['desired_goal']['keypoints']):
+        # 1500 steps for one episode
+        if self.n_step%1500 != 0:
             pass
         else:
             self.object_goal_position, self.object_goal_orientation = get_pose_from_keypoints(observation['desired_goal']['keypoints'])
             self.keypoints = observation['desired_goal']['keypoints']
             self.goal_pos_rotate = [self.object_goal_position, quat_rotate_inverse(self.quats_symmetry[1], self.object_goal_position), quat_rotate_inverse(self.quats_symmetry[2], self.object_goal_position)]
             self.goal_ori_rotate = [self.object_goal_orientation, quat_mul(self.quats_symmetry_conjugate[1], self.object_goal_orientation), quat_mul(self.quats_symmetry_conjugate[2], self.object_goal_orientation)]
-
+        self.n_step+=1
 
         for j in range(3):
             self.obs_limbs[j, :3]=dof_pos_scaled[self.symm_agents_inds[j]]
