@@ -13,12 +13,6 @@ from types import SimpleNamespace
 
 import time
 
-def scale_transform(x, lower, upper):
-    # default value of center
-    offset = (lower + upper) * 0.5
-    # return normalized tensor
-    return 2 * (x - offset) / (upper - lower)
-
 def unscale_transform(x, lower, upper):
     # default value of center
     offset = (lower + upper) * 0.5
@@ -107,7 +101,8 @@ class TorchBasePolicy(PolicyBase):
         self.device = "cpu"
 
         # get absolute path for predefined info
-        checkpoint_path = policies.get_model_path("Trifinger-noMoveCost-masa-85.pt")
+        checkpoint_path = policies.get_model_path("Trifinger-noscale-masa-85.pt")
+        # checkpoint_path = policies.get_model_path("Trifinger-noMoveCost-masa-85.pt")
         params_path = policies.get_model_path("params_masa.pt")
         env_info_path = policies.get_model_path("env_info.pt")
         obs_test_path = policies.get_model_path("obs_test.pt")
@@ -180,16 +175,6 @@ class TorchBasePolicy(PolicyBase):
             return action
     
     def get_obs(self, observation):
-        dof_pos_scaled = scale_transform(observation['robot_observation']['position'],
-                                         self._dof_position_scale.low,
-                                         self._dof_position_scale.high)
-        dof_vel_scaled = scale_transform(observation['robot_observation']['velocity'],
-                                         self._dof_velocity_scale.low,
-                                         self._dof_velocity_scale.high)
-        action_scaled = scale_transform(observation['action'],
-                                        self._action_scale.low,
-                                        self._action_scale.high)
-
         # 1500 steps for one episode
         if self.n_step%1500 != 0:
             pass
@@ -201,17 +186,15 @@ class TorchBasePolicy(PolicyBase):
         self.n_step+=1
 
         for j in range(3):
-            self.obs_limbs[j, :3]=dof_pos_scaled[self.symm_agents_inds[j]]
-            self.obs_limbs[j, 3:6]=dof_vel_scaled[self.symm_agents_inds[j]]
-            self.obs_limbs[j, 6:]=action_scaled[self.symm_agents_inds[j]]
+            self.obs_limbs[j, :3]=observation['robot_observation']['position'][self.symm_agents_inds[j]]
+            self.obs_limbs[j, 3:6]=observation['robot_observation']['velocity'][self.symm_agents_inds[j]]
+            self.obs_limbs[j, 6:]=observation['action'][self.symm_agents_inds[j]]
 
         self.obs_center_rotate[0,:3] = observation['object_observation']['position']
         self.obs_center_rotate[0,3:7] = observation['object_observation']['orientation']
         self.obs_center_rotate[0,7:10] = self.goal_pos_rotate[0]
         self.obs_center_rotate[0,10:] = self.goal_ori_rotate[0]
-        self.obs_center_rotate[0] = scale_transform(self.obs_center_rotate[0],
-                                            self._object_obs_scale.low,
-                                            self._object_obs_scale.high)
+
         self.obs_rotates[0,:14]=self.obs_center_rotate[0]
         self.obs_rotates[0,14:23]=self.obs_limbs[0]
         self.obs_rotates[0,23:32]=self.obs_limbs[1]
@@ -222,9 +205,7 @@ class TorchBasePolicy(PolicyBase):
             self.obs_center_rotate[i,3:7] = quat_mul(self.quats_symmetry_conjugate[i], observation['object_observation']['orientation'])
             self.obs_center_rotate[i,7:10] = self.goal_pos_rotate[i]
             self.obs_center_rotate[i,10:] = self.goal_ori_rotate[i]
-            self.obs_center_rotate[i] = scale_transform(self.obs_center_rotate[i],
-                                                self._object_obs_scale.low,
-                                                self._object_obs_scale.high)
+
             self.obs_rotates[i,:14]=self.obs_center_rotate[i]
             self.obs_rotates[i,14:23]=self.obs_limbs[i]
             self.obs_rotates[i,23:32]=self.obs_limbs[(i+1)%3]
